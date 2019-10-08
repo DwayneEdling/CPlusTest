@@ -280,7 +280,7 @@ bool SaveInformation::CopyBufftoStruct(UserInfo *test, string buf, int offset, R
 #endif // DEBUG
 
 	// Copy the string to an array. 
-	strcpy(temp, buf.c_str());
+	std::strcpy(temp, buf.c_str());
 
 	// Copy the array to the struct/record
 	for (int i = 0; i < MAXLEN; i++) {
@@ -374,7 +374,7 @@ int main()
 				//saved = Authenticate.GetUserInfo(i);
 				saved = Authenticate.UnMangle(i);
 
-				if (strcmp(saved.userID, check.userID) == 0 && strcmp(saved.password, check.password) == 0) {
+				if (std::strcmp(saved.userID, check.userID) == 0 && std::strcmp(saved.password, check.password) == 0) {
 					login = true;
 					attempt = 0;
 					i = Authenticate.GetLastIndex() + 1;
