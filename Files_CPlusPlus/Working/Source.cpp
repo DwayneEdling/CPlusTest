@@ -6,9 +6,11 @@
 
 using namespace std;
 
-#define DEBUG
-
+//#define DEBUG
 #define MAXLEN 10	//the 10th character is a NULL, max length is 9
+#define MANGLEN 4	// How many characters to mangle
+
+enum RECTYPE { INDEX, ID, PW };
 
 struct UserInfo {
 	char userID[MAXLEN];
@@ -17,67 +19,80 @@ struct UserInfo {
 
 
 class SaveInformation {
-	char hash[MAXLEN] = {0xf,1,0xf,3,0xf,5,0xf,0xf,7};
+	char hash[MAXLEN] = {0xf,0,1,0,0,0,0,0,0};
 	UserInfo InputInfo = { "", "" };
 	UserInfo ValidIdPw[MAXLEN * 2]; 
+
+	bool CheckIdPw(UserInfo& temp);
 	int NextIndex = 0;						
+	void Mangle(UserInfo temp);
+	UserInfo* GetAuthRecord(void);
+	void PutAuthRecord(UserInfo*);
+	bool CopyBufftoStruct(UserInfo*, string, int, RECTYPE);
 
 public:
 	SaveInformation(); //default
 	~SaveInformation();//destructor
-	void Mangle(UserInfo temp);
 	UserInfo UnMangle(int index);
 	int ReadID(UserInfo &temp);
 	int ReadPW(UserInfo &temp);
-	bool CheckIdPw(UserInfo& temp);
-	bool CheckId(UserInfo& temp);
 	bool AddIdPw(UserInfo& temp);
 	UserInfo GetUserInfo(int index);
 	int GetLastIndex(void);
+	void ReadFile(int count);
+	void WriteFile(UserInfo record[], int count);
 };
 
 SaveInformation::SaveInformation() : InputInfo() {}
 SaveInformation::~SaveInformation() {}
 
+// MANGLE: This method mangles information before the file/structure
+// element is saved. In production this would be an 
+// encryption call
 void SaveInformation::Mangle(UserInfo temp) {
-	int i=0;
-	while (i < MAXLEN)
+	int i = 0, CurrIndex = NextIndex - 1;
+
+	while (i < MAXLEN and NextIndex != 0)
 	{
-		ValidIdPw[NextIndex].userID[i] = temp.userID[i] ^ hash[i];
-		ValidIdPw[NextIndex].password[i] = temp.password[i] ^ hash[i];
+		ValidIdPw[CurrIndex].userID[i] = temp.userID[i] ^ hash[i];
+		ValidIdPw[CurrIndex].password[i] = temp.password[i] ^ hash[i];
 		i++;
 	}
 #ifdef DEBUG
-	cout << "The hashed password is " << ValidIdPw[0].password << endl;
-	cout << "The hashed ID is " << ValidIdPw[0].userID << endl;
+	cout << "NextIndex " << NextIndex << endl;
+	cout << "temp id and pw " << temp.userID << " " << temp.password << endl;
+	cout << "ValidIdPw " << ValidIdPw[CurrIndex].userID << " " << ValidIdPw[CurrIndex].password << endl;
+	cout << "The hashed passwordM is " << ValidIdPw[0].password << endl;
+	cout << "The hashed IDM is " << ValidIdPw[0].userID << endl;
 #endif // DEBUG
 }
 
 int SaveInformation::GetLastIndex(void) {
+#ifdef DEBUG
+	cout << "Current Index is " << NextIndex << endl;
+#endif // DEBUG
 	return (NextIndex);
 }
 
+// UNMANGLE: This method recovers the mangled information
+// in saved file/structure. In production this would be an 
+// decryption call.
 UserInfo SaveInformation::UnMangle(int index) {
 	int i = 0;
 	UserInfo temp;
-	while (i < MAXLEN-1)
+
+	while (i < MAXLEN)
 	{
 		temp.userID[i] = ValidIdPw[index].userID[i] ^ hash[i];
-		temp.password[i] = ValidIdPw[index].password[i] ^ hash[i];
+		temp.password[i] =  ValidIdPw[index].password[i] ^ hash[i];
 		i++;
 	}
-#ifdef _DEBUG
-	cout << "The unhashed password is " << temp.password << endl;
-	cout << "The unhashed ID is " << temp.userID << endl;
-#endif // DEBUG
 	return temp;
 }
 
+// ReadID: This module checks the length of the input using string and converts the string to a char[].
 int SaveInformation::ReadID(UserInfo &temp) {
-	// This module checks the length of the input using string and converts the string to a char[].
-	// In a production system there would be addtional checks for character types, numbers, capital 
-	// and lower case letters and special symbols. If the criteria for a ID was not meet a retry would 
-	// be requested. Only length is checked for this test.
+	
 	string check;
 	int length;
 
@@ -111,6 +126,11 @@ int SaveInformation::ReadID(UserInfo &temp) {
 	return length;
 }
 
+// ReadPW: This module checks the length of the input using string and converts the string to a char[].
+// In a production system there would be addtional checks for character types like numbers, capital 
+// and lowercase letters and special symbols. If the criteria for a PW strength was not meet (something 
+// like must include 3 of these elements) a retry would be requested. Only length is checked for 
+// this test.
 int SaveInformation::ReadPW(UserInfo &temp) {
 	string check;
 	int length;
@@ -142,15 +162,18 @@ int SaveInformation::ReadPW(UserInfo &temp) {
 	}
 	return length;
 }
-
+// AddIdPw: This module adds the ID and Password to the structure/file
 bool SaveInformation::AddIdPw(UserInfo& temp) {
 	bool result = true;
 	UserInfo sample;
 
 	//Does the ID already exist?
+
+	// Unmangle the IDs to check them
 	for (int i = 0; i < NextIndex; i++) {
 		sample = UnMangle(i);
-		cout << "Loop count is" << i << endl;
+
+		// Look fo any matchig IDs
 		if (temp.userID == sample.userID) {
 			cout << "This ID cannot be used.";
 			result = false;
@@ -160,57 +183,49 @@ bool SaveInformation::AddIdPw(UserInfo& temp) {
 		// Duplicate passwords are not necessarily bad.
 	}
 	if(result == true) {
-		ValidIdPw[NextIndex] = temp;
-#ifdef DEBUG
-			cout << "ID " << NextIndex << " is " << ValidIdPw[NextIndex].userID << endl;
-			cout << "Password " << NextIndex << " is " << ValidIdPw[NextIndex].password << endl;
-			cout << endl;
-#endif // DEBUG
-		if (NextIndex < (MAXLEN * 2)) {
-			Mangle(ValidIdPw[NextIndex++]);
-		}
-		else {
-			cout << "Registry is full!" << endl;
-		}
-#ifdef DEBUG
-			cout << "mangled ID " << (NextIndex -1) << " is " << ValidIdPw[NextIndex-1].userID << endl;
-			cout << "mangled Password " << (NextIndex - 1) << " is " << ValidIdPw[NextIndex-1].password << endl;
-			cout << endl;
-#endif // DEBUG
+		// Check if our file is full, I artifically set a low limit.
+			if (NextIndex < (MAXLEN * 2)) {
+				// Save the ID and password to structure/file
+				ValidIdPw[NextIndex] = temp;
+				// This is the only place were NextIndex is incremented
+				Mangle(ValidIdPw[NextIndex++]);
+				int CurrIndex = NextIndex - 1;
+			}
+			else {
+				cout << "Registry is full!" << endl;
+			}
 	}
 
-#ifdef DEBUG
-	for (int i = 0; i < NextIndex; i++) {
-		cout << "Savd ID " << i << " is " << ValidIdPw[i].userID << endl;
-		cout << "Saved Password " << i << " is " << ValidIdPw[i].password << endl;
-		cout << endl;
-	}
-#endif // DEBUG
-
-	return result;
-}
-bool SaveInformation::CheckId(UserInfo &temp) {
-	bool result = false;
-	UserInfo sample;
-	//Search the saved array for a matching ID and password. 
-	for (int i = 0; i < NextIndex; i++) {
-		sample = UnMangle(i);
-		if (temp.userID == sample.userID)
-			result = true;
-	}
+	// Let caller know if this succeeded.
 	return result;
 }
 
+UserInfo* SaveInformation::GetAuthRecord(void) {
+	return &ValidIdPw[0];
+}
+
+void SaveInformation::PutAuthRecord(UserInfo*) {
+
+}
+
+//CheckID: Checks the ID and PW for a macth in the structure/file.
 bool SaveInformation::CheckIdPw(UserInfo &temp) {
 	bool result = false;
 	UserInfo sample;
 	//Search the saved array for a matching ID and password. 
-	for (int i = 0; i < NextIndex; i++) {
-		sample = UnMangle(i);
-		if (temp.userID == sample.userID)
-			if (temp.password == sample.password)
-				result = true;
+	
+	if (NextIndex != 0) {//There is nothing to check if NextIndex == 0.
+		for (int i = 0; i < NextIndex; i++) {
+			cout << "Unmangle sample!" << endl;
+			sample = UnMangle(i);
+			cout << "UnMangled Id sample1 is " << sample.userID << endl;
+			cout << "UnMangled Id temp1 is " << temp.userID << endl;
+			if (temp.userID == sample.userID)
+				if (temp.password == sample.password)
+					result = true;
+		}
 	}
+	
 	return result;
 }
 
@@ -229,25 +244,19 @@ string CheckYesNo(string input) {
 	return response;
 }
 
-UserInfo WriteFile(UserInfo record[], int count) {
+void SaveInformation::WriteFile(UserInfo record[], int count) {
 	static int index = 0;
 	static const char* filename = "Auth.txt";
-	static const UserInfo test[] = { "Dwayne", "Password1", "Arthur", "Password2","Edling", "Password3"};
-
-	cout << test[0].password << test[0].userID << endl;
-	cout << test[1].password << test[1].userID << endl;
-	cout << test[2].password << test[2].userID << endl;
 
 	// write a file
-	cout << "write the file:" << count << endl;
 
 	ofstream output(filename);
 	if (output.is_open()) {
 		while (index < count) {
-			output << index << " " << test[index].userID << " " << test[index].password << endl;
+			// format for each entry: index <space> ID <space> password <EOL> 
+			output << index << " " << ValidIdPw[index].userID << " " << ValidIdPw[index].password << endl;
 			index++;
 		}
-		cout << "The file text is " << count << endl;
 		output.close();
 	}
 	else cout << "Unable to open myfile text...";
@@ -256,91 +265,77 @@ UserInfo WriteFile(UserInfo record[], int count) {
 	}
 	
 	output.close();
+}
 
+
+
+// Copies a striing value into the authorization structure.
+bool SaveInformation::CopyBufftoStruct(UserInfo *test, string buf, int offset, RECTYPE type) {
 	
+	//UserInfo* record used for copy;
+	char temp[MAXLEN];
 
-	// delete file
-	//cout << "delete file." << endl;
-	//remove(filename);
-	return(*test);
- }
+#ifdef DEBUG
+	cout << "This is a type " << type << " buffer value is " << buf << " offset is " << offset << endl;
+#endif // DEBUG
 
-union chrstr
-{
-public:
-	char chr[MAXLEN];
-	string str;
-};
+	// Copy the string to an array. 
+	strcpy(temp, buf.c_str());
 
-void ReadFile(int count) {
-	static int offset, index = 0;
+	// Copy the array to the struct/record
+	for (int i = 0; i < MAXLEN; i++) {
+		if (type == ID) {
+			test[offset].userID[i] = temp[i];
+		}
+		else if (type == PW) {
+			test[offset].password[i] = temp[i];
+		}
+		else {
+			cout << "Copy type did not match!" << endl;
+			return false;
+		}
+	}
+#ifdef DEBUG
+	if (type == ID) {
+		cout << "The ID put in strut is " << test[offset].userID << endl;
+	}
+	else {
+		cout << "The PW put in strut is " << test[offset].password << endl;
+	}
+#endif // DEBUG
+	return true;
+}
+
+// ReadFile: Reads a file in and moves to to a temporary structure. For use by other methods
+void SaveInformation::ReadFile(int count) {
+	static int offset = 0, index = 0;
 	static const char* filename = "Auth.txt";
 	static const char* textstring = "This is the test file";
-	UserInfo test[MAXLEN*2];
-	
-	//UserInfo* record;
-	chrstr temp;
 
 	// read a file
 	string buf = "test";
-	char saved[MAXLEN];
-	cout << "read the file:" << endl;
-	//ifstream infile(filename);
-	//ofstream output(filename);
+	//cout << "read the file:" << endl;
 	ifstream input(filename);
 	if (input.is_open()) {
-		//input.getline(buf, sizeof(buf));
-		input >> buf;
-		if (buf == "0") {
-			offset = 0;
-		} else cout << "NEED CONVERSION";
-		cout << "This is buf1 " << buf << endl;
-		input >> buf;
-		*saved = (void*)&buf;
-		*test[offset].userID = (char*)buf.c_str();
-		cout << "This is buf2 " << buf << endl;
-		input >> buf;
-		test[offset].userID = reinterpret_cast<char*> buf;
-		cout << "This is buf3 " << buf << endl;
-		input >> buf;
-		if (buf == "1") {
-			offset = 1;
-		} else cout << "NEED CONVERSION";
-		cout << "This is buf1 " << buf << endl;
-		input >> buf;
-		test[offset].userID = (char*)buf.c_str();
-		cout << "This is buf2 " << buf << endl;
-		input >> buf;
-		test[offset].userID = (char*)buf.c_str();
-		cout << "This is buf3 " << buf << endl;
-		input >> buf;
-		if (buf == "2") {
-			offset = 2;
-		} else cout << "NEED CONVERSION";
-		cout << "This is buf1 " << buf << endl;
-		input >> buf;
-		test[offset].userID = (char*)buf.c_str();
-		cout << "This is buf2 " << buf << endl;
-		input >> buf;
-		test[offset].userID = (char*)buf.c_str();
-		cout << "This is buf3 " << buf << endl;
-		input.close();
-	} else cout << "Unable to open input file text...";
-	/*while (index=0 < count){
-		cout << count << endl;
-		offset = index * MAXLEN * 2;
-		cout << offset << endl;
-		for (int x = 0; x < (MAXLEN * 2); x++){
-			cout << buf[offset + x];
+		while (!input.eof()) {
+			// This builds the private UserInfo ValidIdPw struct.
+			input >> buf; //buf 1 index
+			if (buf == "" || input.eof()) break; // Did not read in a buffer.
+			offset = stoi(buf, nullptr);
+			input >> buf; //buf 2 ID
+			if (input.eof()) break; // Did not read in a buffer. 
+			CopyBufftoStruct(ValidIdPw, buf, offset, ID);
+			input >> buf; //buf 3 password
+			if (input.eof()) break; // Did not read in a buffer.
+			CopyBufftoStruct(ValidIdPw, buf, offset, PW);
+			buf = "";
 		}
-		cout << endl;
-		index++;
-	}*/
+		// Set the NextIndex pointer
+		NextIndex = offset + 1;
+		//cout << "Out of while loop." << endl;
+	} else cout << "Initial state no read file exist" << endl;
 
-	// delete file
-	//cout << "delete file." << endl;
-	//remove(filename);
-	//return record;
+	input.close();
 }
 
 
@@ -349,112 +344,59 @@ int main()
 {
 	// UserInfo saved = {"Dwayne", "CPlus2019"};
 	UserInfo saved, check, temp; 
-	//UserInfo test[MAXLEN*2];
+	UserInfo test[MAXLEN*2];
 	string input = "", line = "test";
+	bool login = false;
 
-	int attempt = 3, index, count;
-
+	int attempt = 3 /* index, count*/ ;
 	SaveInformation Authenticate;
-	//saved = Authenticate.GetUserInfo(0);
-	//Authenticate.Mangle(saved);
-	//Authenticate.UnMangle(0);
-	/*char buf[MAXLEN];
-	input = "Dwayne, CPlus2019\n";
-	//buf = input;
-	cout << "Test it is " << line << endl;
-	ofstream outputfile("Auth.txt");
-	//outputfile.open("Auth.txt");
-	if (outputfile.is_open()) {
-		outputfile << input;
-		cout << "The file text is " << input << endl;
-		outputfile.close();
-	} else cout << "Unable to open myfile text...";
-	ifstream inputfile("Auth.txt");
-	//inputfile.open("Auth.txt");
-	if (inputfile.is_open()) {
-		cout << "This is from Auth.txt before " << line << endl;
-		inputfile >> line;
-		//inputfile >> saved;
-		cout << "This is from Auth.txt after " << line << endl;
-		inputfile.close();
-		
-	} else cout << "Unable to open myifile text...";*/
-
-	//WriteFile(test, 3);
-	ReadFile(3);
-
+	// Read the existing file. YOU NEED TO FIX THE 3 BELOW.
+	Authenticate.ReadFile(3);
+	cout << endl;
 	cout << "Do you have an account? (answer yes or no) ";
 	cin >> input;
 	cout << endl;
 	if(CheckYesNo(input) == "yes") {
 		// An account exist in the system.
-		// Read the index file.
-		index = 0;
-		ofstream indexout("index.bin");
-		ifstream myindex ("index.bin");
-		if (myindex.is_open()) {
-			myindex >> index;
-			cout << "The file index is " << index << endl;
-		} else cout << "Unable to open index file" << endl;
-
-		//int zero = (char) "0";
-		//int maxlen = (char)("0" + (MAXLEN*2));
-		//cout << "zero is" << zero << endl;
-		//cout << "maxlen is" << maxlen << endl;
-		if (index > 0) {
-			for (int i = index; i >= 0; i--) {
-				if (myindex.is_open()) {
-					myindex >> count;
-					cout << "The file count is " << count << endl;
-				}
-				else cout << "Unable to open data file";
-			}
-		}
-		for(int i = index; i >= 0; i--) {
-			//myfile.open("Autentication.txt");
-			//if (myfile.is_open()) {
-			//	myfile >> line;
-			//	cout << "The file index is " << line;
-			//} else cout << "Unable to open data file";
-
-
-		}
-		cout << "Start While" << endl;
 		while (attempt != 0) {
-			cout << "step 1" << endl;
+			// Give the user 3 tries to log in
+			// Is the ID is too long just exit
 			if (Authenticate.ReadID(check) > (MAXLEN - 1)) {
 				cout << "User ID is illegal!" << endl;
 				break;
 			}
-			cout << "step 2" << endl;
+			// If the PW is too long just exit.
 			if (Authenticate.ReadPW(check) > (MAXLEN - 1)) {
 				cout << "Password is illegal!" << endl;
 				break;
 			}
-			cout << "step 3 Index is " << Authenticate.GetLastIndex() << endl;
-			for (int i = 0; i <= Authenticate.GetLastIndex(); i++) {
-				saved = Authenticate.GetUserInfo(i);
-				cout << "Saved ID is " << saved.userID << endl;
-				cout << "Check ID is " << check.userID << endl;
-				cout << endl;
+			for (int i = 0; i <= (Authenticate.GetLastIndex()-1); i++) {
+				//saved = Authenticate.GetUserInfo(i);
+				saved = Authenticate.UnMangle(i);
 
 				if (strcmp(saved.userID, check.userID) == 0 && strcmp(saved.password, check.password) == 0) {
+					login = true;
+					attempt = 0;
+					i = Authenticate.GetLastIndex() + 1;
 					cout << "Login Succeeded!" << endl;
 					break;
 				}
 			}
-			cout << "Invalid User ID or Password, please try again!" << endl;
-			attempt--;
-			cout << endl;
-			if (attempt)
-				cout << "You have " << attempt << " more chances..." << endl;
-			else
-				cout << "Login Failed!" << endl;
-			cout << endl;
+			if (login == false) {
+				cout << "Invalid User ID or Password, please try again!" << endl;
+				attempt--;
+				cout << endl;
+				if (attempt)
+					cout << "You have " << attempt << " more chances..." << endl;
+				else
+					cout << "Login Failed!" << endl;
+				cout << endl;
+			}
 		}
 	}
 	else {
 		// The user does not have an account
+
 		if (CheckYesNo(input) == "no") {
 			cout << "Do you want to create an account? (answer yes or no) ";
 			cin >> input;
@@ -463,27 +405,17 @@ int main()
 				// The user does not want an account
 				cout << "Thanks for visting our site!";
 			else
+				// The user wants an account, ask for a user ID and a password.
 				if (CheckYesNo(input) == "yes") {
 					// We need to create a new user account
 					// Check length first with ReadID and ReadPW, we can only handle 9 characters
 					if (((Authenticate.ReadID(temp)) < MAXLEN) && ((Authenticate.ReadPW(temp))) < MAXLEN) {
+						// Add the autentication information to our structure.
 						if (Authenticate.AddIdPw(temp) == true) {
-							
-							//if (myindex.is_open()) {
-							//	myindex << Authenticate.GetLastIndex();
-							//	cout << "The file index is " << index;
-							//else cout << "Unable to open index file";
-							
-							//if (myfile.is_open()) {
-							//	myfile << saved.userID;
-							//	myfile << saved.password;
-							//	cout << "The file index is " << line;
-							//} else cout << "Unable to open data file";
-
-							// the ID does not already exist so we can create a new entry
-							cout << "Your account has been created." << endl;
+							// Save this updated information to our file.
+							Authenticate.WriteFile(test, Authenticate.GetLastIndex());
+							cout << "Account has been created" << endl;
 							cout << "Restart the program to log in." << endl;
-							cout << endl;
 						}
 						else
 							// This ID already exist
@@ -496,6 +428,6 @@ int main()
 		}
 		else
 			cout << "Invalid response, thanks for visting our site!";
-	}
+	}	
 	return 0;
 }
